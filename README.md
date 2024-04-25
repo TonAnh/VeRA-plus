@@ -27,7 +27,7 @@ python main_lora.py \
 --use_rslora true \
 --lr 4e-4
 ```
-For **model_name_or_path**, users can choose between "roberta-base" or "roberta-large". They should replace the placeholder text with their desired option.
+For `**model_name_or_path**`, users can choose between "roberta-base" or "roberta-large". They should replace the placeholder text with their desired option.
 For task, users can choose between "sst2", "mrpc", "cola", "qnli", "rte", or "stsb". Again, they should replace the placeholder text with their desired option.
 For use_rsvera, users can set it to "true" if they want to apply rank stabilization or "false" otherwise. They should replace the placeholder text accordingly.
 ### VeRA
