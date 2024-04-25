@@ -5,8 +5,10 @@
 - [Example](#example)
 
 ## Installation
+```python
 pip install peft
 pip install evaluate
+```
 
 ## Example 
 # LoRA
