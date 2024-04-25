@@ -24,7 +24,35 @@ python main_lora.py \
 --max_length 512 \
 --r 8 \
 --lora_alpha 8 \
---use_rslora "true" \
+--use_rslora true \
 --lr 4e-4
+```
+### VeRA
+```python
+python rsvera.py \
+--batch_size 64 \
+--model_name_or_path "roberta-base" \
+--task "mrpc" \
+--num_epochs 30 \
+--max_length 512 \
+--r 1024 \
+--vera_alpha 8 \
+--use_rsvera true \
+--head_lr 4e-3 \
+--vera_lr 1e-2
+```
+### VeRA-plus
+```python
+python rsvera.py\
+ --batch_size 64\
+ --model_name_or_path roberta-base\
+ --task mrpc\
+ --num_epochs 30\
+ --max_length 512\
+ --r 1024\
+ --vera_alpha 8\
+ --use_rsvera true\
+ --head_lr 4e-3\
+ --vera_lr 1e-2\
 ```
 
