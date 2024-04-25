@@ -54,7 +54,7 @@ python rsvera.py \
 ```
 ### VeRA-plus
 ```python
-python rsvera.py\
+python vera-plus.py\
  --batch_size 64\
  --model_name_or_path roberta-base\
  --task mrpc\
