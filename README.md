@@ -1,5 +1,11 @@
 # VeRA-plus
-
+This repo contains the code of VeRA-plus and several examples of executing LoRA, VeRA, and VeRA-plus.
+**LoRA (Low-Rank Adaptation)**
+LoRA represents weight updates using a low-rank decomposition technique to enable fine-tuning in a parameter-efficient low-dimensional space.
+**VeRA (Vector-based Random Matrix Adaptation)**
+VeRA extends the LoRA method by introducing trainable scaling vectors and redefining low-rank matrices used in fine-tuning. Instead of updating the entire weight matrix, only scaling vectors are adjusted, while low-rank matrices remain frozen, random, and shared across layers. This results in a significant reduction in the number of trainable parameters required for adaptation.
+**VeRA-plus**
+VeRA-plus applies rank stabilization by dividing the scaling factor by the square root of the rank and introduces another scaling vector, Λc, for the input layer.
 ## Table of Contents
 - [Installation](#installation)
 - [Example](#example)
