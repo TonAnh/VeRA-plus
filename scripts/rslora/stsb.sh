@@ -1,14 +1,14 @@
 #!/bin/bash
-export CUDA_VISIBLE_DEVICES=2
+export CUDA_VISIBLE_DEVICES=1
 export WORKDIR=./
 export PYTHONPATH="$WORKDIR:$PYTHONPATH"
-python rsvera.py \
-    --batch_size 64 \
+python main_lora.py \
+    --batch_size 16 \
     --model_name_or_path "roberta-base" \
     --task "stsb" \
     --num_epochs 80 \
     --max_length 512 \
-    --r 1024 \
-    --vera_alpha 8 \
-    --head_lr 1e-2 \
-    --vera_lr 1e-2
+    --r 8 \
+    --lora_alpha 8 \
+    --use_rslora \
+    --lr 4e-4

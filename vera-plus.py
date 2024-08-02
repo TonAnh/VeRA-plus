@@ -143,7 +143,10 @@ train_dataloader = DataLoader(tokenized_datasets["train"], shuffle=True, collate
 eval_dataloader = DataLoader(tokenized_datasets["validation"], shuffle=False, collate_fn=collate_fn, batch_size=batch_size)
 test_dataloader = DataLoader(tokenized_datasets["test"], shuffle=False, collate_fn=collate_fn, batch_size=batch_size)
 
-model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, return_dict=True, max_length=None)
+if task == "stsb":
+    model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, return_dict=True, max_length=None, num_labels = 1)
+else:
+    model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, return_dict=True, max_length=None)
 model = get_peft_model(model, peft_config)
 model.print_trainable_parameters()
 model
@@ -179,7 +182,10 @@ for epoch in range(num_epochs):
         batch.to(device)
         with torch.no_grad():
             outputs = model(**batch)
-        predictions = outputs.logits.argmax(dim=-1)
+        if task == "stsb":
+            predictions = outputs.logits
+        else:
+            predictions = outputs.logits.argmax(dim=-1)
         predictions, references = predictions, batch["labels"]
         metric.add_batch(
             predictions=predictions,
@@ -202,7 +208,10 @@ for step, batch in enumerate(tqdm(eval_dataloader)):
     batch.to(device)
     with torch.no_grad():
         outputs = model(**batch)
-    predictions = outputs.logits.argmax(dim=-1)
+    if task == "stsb":
+        predictions = outputs.logits
+    else:
+        predictions = outputs.logits.argmax(dim=-1)
     predictions, references = predictions, batch["labels"]
     metric.add_batch(
         predictions=predictions,
@@ -210,6 +219,6 @@ for step, batch in enumerate(tqdm(eval_dataloader)):
     )
 
 eval_metric = metric.compute()
-print(eval_metric)
+print("Final evaluate result: ", eval_metric)
 
 

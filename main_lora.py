@@ -24,6 +24,7 @@ from peft import (
 from lora.config import LoraConfig
 import evaluate
 from datasets import load_dataset
+from datasets import Value
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup, set_seed, AutoConfig
 from tqdm import tqdm
 from lora.model import LoraModel
@@ -81,7 +82,6 @@ if getattr(tokenizer, "pad_token_id") is None:
 datasets = load_dataset("glue", task)
 metric = evaluate.load("glue", task)
 
-
 def tokenize_function(examples):
     if task == "sst2":
         return tokenizer(examples["sentence"], truncation=True, max_length=max_length)
@@ -114,6 +114,7 @@ def remove_columns(task):
     else:
         raise ValueError(f"Task {task} not supported.")
 
+
 tokenized_datasets = datasets.map(
     tokenize_function,
     batched=True,
@@ -123,7 +124,20 @@ tokenized_datasets = datasets.map(
 # We also rename the 'label' column to 'labels' which is the expected name for labels by the models of the
 # transformers library
 tokenized_datasets = tokenized_datasets.rename_column("label", "labels")
+# breakpoint()
+# # Step 1: Convert labels to integers if task is stsb
+# def convert_labels_to_int(examples):
+#     if task == "stsb":
+#         examples["labels"] = int(round(examples["labels"]))
+#     return examples
 
+# if task == "stsb":
+#     # Apply conversion function
+#     tokenized_datasets["train"] = tokenized_datasets["train"].map(convert_labels_to_int)
+#     tokenized_datasets["validation"] = tokenized_datasets["validation"].map(convert_labels_to_int)
+#     # Step 2: Cast column type to int after conversion
+#     tokenized_datasets["train"] = tokenized_datasets["train"].cast_column("labels", Value(dtype="int32"))
+#     tokenized_datasets["validation"] = tokenized_datasets["validation"].cast_column("labels", Value(dtype="int32"))
 
 def collate_fn(examples):
     return tokenizer.pad(examples, padding="longest", return_tensors="pt")
@@ -136,11 +150,13 @@ eval_dataloader = DataLoader(
 )
 
 #model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, return_dict=True, max_length=None)
-model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, return_dict=True)
+if task == "stsb":
+    model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, return_dict=True, num_labels=1)
+else:
+    model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, return_dict=True)
 model = get_peft_model(model, peft_config)
 model.print_trainable_parameters()
 model
-
 optimizer = AdamW(params=model.parameters(), lr=lr)
 
 # Instantiate scheduler
@@ -167,7 +183,10 @@ for epoch in range(num_epochs):
         batch.to(device)
         with torch.no_grad():
             outputs = model(**batch)
-        predictions = outputs.logits.argmax(dim=-1)
+        if task == "stsb":
+            predictions = outputs.logits
+        else:
+            predictions = outputs.logits.argmax(dim=-1)
         predictions, references = predictions, batch["labels"]
         metric.add_batch(
             predictions=predictions,
@@ -189,7 +208,11 @@ for step, batch in enumerate(tqdm(eval_dataloader)):
     batch.to(device)
     with torch.no_grad():
         outputs = model(**batch)
-    predictions = outputs.logits.argmax(dim=-1)
+    if task == "stsb":
+        predictions = outputs.logits
+    else:
+        predictions = outputs.logits.argmax(dim=-1)
+        
     predictions, references = predictions, batch["labels"]
     metric.add_batch(
         predictions=predictions,
@@ -197,7 +220,7 @@ for step, batch in enumerate(tqdm(eval_dataloader)):
     )
 
 eval_metric = metric.compute()
-print(eval_metric)
+print("Final evaluate result: ", eval_metric)
 
 
  

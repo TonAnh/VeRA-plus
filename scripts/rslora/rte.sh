@@ -1,13 +1,14 @@
 #!/bin/bash
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=5
 export WORKDIR=./
 export PYTHONPATH="$WORKDIR:$PYTHONPATH"
 python main_lora.py \
-    --batch_size 16 \
+    --batch_size 32 \
     --model_name_or_path "roberta-base" \
-    --task "stsb" \
-    --num_epochs 40 \
+    --task "rte" \
+    --num_epochs 160 \
     --max_length 512 \
     --r 8 \
     --lora_alpha 8 \
-    --lr 4e-4
+    --use_rslora \
+    --lr 5e-4
