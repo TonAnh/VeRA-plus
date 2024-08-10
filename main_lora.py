@@ -45,7 +45,7 @@ parser.add_argument("--max_length", type=int, default=512, help="Maximum sequenc
 parser.add_argument("--r", type=int, default=8, help="R value for LoraConfig")
 parser.add_argument("--lora_alpha", type=int, default=8, help="Lora alpha value for LoraConfig")
 parser.add_argument("--lora_dropout", type=float, default=0.1, help="Lora dropout value for LoraConfig")
-parser.add_argument("--use_rslora", action="store_true", help="Whether to use RSLora in LoraConfig")
+parser.add_argument("--use_rslora", type=bool, default=True, help="Whether to use RSLora in LoraConfig")
 parser.add_argument("--lr", type=float, default=4e-4, help="Learning rate")
 
 # Parse arguments

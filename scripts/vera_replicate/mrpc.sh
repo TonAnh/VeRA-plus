@@ -10,6 +10,6 @@ python rsvera.py \
     --max_length 512 \
     --r 1024 \
     --vera_alpha 8 \
-    --use_rsvera \
+    --use_rsvera True \
     --head_lr 4e-3 \
     --vera_lr 1e-2

@@ -18,7 +18,7 @@ from typing import List, Optional, Union
 
 from peft.config import PeftConfig
 from peft.utils import PeftType
-PeftType.VERA = "VERA"
+# PeftType.VERA = "VERA"
 
 @dataclass
 class VeraConfig(PeftConfig):

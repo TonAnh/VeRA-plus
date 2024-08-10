@@ -10,5 +10,5 @@ python main_lora.py \
     --max_length 512 \
     --r 8 \
     --lora_alpha 8 \
-    --use_rslora \
+    --use_rslora True\
     --lr 4e-4
