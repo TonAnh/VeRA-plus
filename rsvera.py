@@ -14,15 +14,15 @@ from peft import (
     #VeraConfig,
     PeftType,
 )
-from rsvera.config import VeraConfig
+from rsvera.config import VeraConfig # Custom Config of Vera
 import evaluate
 from datasets import load_dataset
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, get_linear_schedule_with_warmup, set_seed, AutoConfig
 from tqdm import tqdm
-from rsvera.model import VeraModel
+from rsvera.model import VeraModel # Custom Vera Model
 
 
-PEFT_TYPE_TO_MODEL_MAPPING['VERA'] = VeraModel
+PEFT_TYPE_TO_MODEL_MAPPING['VERA'] = VeraModel # Change the VERA model in mapping to Custom Vera Model
 
 # torch.manual_seed(42)
 # random.seed(42)
@@ -41,12 +41,12 @@ parser.add_argument("--num_epochs", type=int, default=2, help="Number of epochs"
 parser.add_argument("--max_length", type=int, default=512, help="Maximum sequence length")
 parser.add_argument("--r", type=int, default=8, help="R value for VeraConfig")
 parser.add_argument("--vera_alpha", type=int, default=8, help="Vera alpha value for VeraConfig")
-parser.add_argument("--use_rsvera", action="store_true", help="Whether to use RSVeRA")
+parser.add_argument("--use_rsvera", type=bool, default=True, help="Whether to use RSVeRA")
 parser.add_argument("--head_lr", type=float, default=4e-4, help="Learning rate (head)")
 parser.add_argument("--vera_lr", type=float, default=4e-4, help="Learning rate (vera)")
 
 args = parser.parse_args()
-# Assign configuration values
+# == Assign configuration values == 
 batch_size = args.batch_size
 model_name_or_path = args.model_name_or_path
 task = args.task
@@ -54,26 +54,16 @@ peft_type = args.peft_type
 device = args.device
 num_epochs = args.num_epochs
 max_length = args.max_length
-
-peft_config = VeraConfig(
-    task_type="SEQ_CLS", 
-    inference_mode=False, 
-    r=args.r, 
-    vera_alpha=args.vera_alpha,
-    use_rsvera=args.use_rsvera,
-    projection_prng_key=0xABC,
-    d_initial=0.1,
-    target_modules=["key","query", "value"],
-    save_projection=True
-)
 head_lr = args.head_lr
 vera_lr = args.vera_lr
 
+# == Set the padding side base on model == 
 if any(k in model_name_or_path for k in ("gpt", "opt", "bloom")):
     padding_side = "left"
 else:
     padding_side = "right"
 
+# == TOKENIZER & LOAD THE DATASET & PREPROCESS DATA == 
 tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, padding_side=padding_side)
 if getattr(tokenizer, "pad_token_id") is None:
     tokenizer.pad_token_id = tokenizer.eos_token_id
@@ -134,7 +124,7 @@ def relabel(example):
 tokenized_datasets["test"] = tokenized_datasets["test"].map(relabel)
 
 
-# Instantiate dataloaders.
+# == Instantiate dataloaders ==
 train_dataloader = DataLoader(tokenized_datasets["train"], shuffle=True, collate_fn=collate_fn, batch_size=batch_size)
 eval_dataloader = DataLoader(
     tokenized_datasets["validation"], shuffle=False, collate_fn=collate_fn, batch_size=batch_size
@@ -145,6 +135,20 @@ if task == "stsb":
     model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, return_dict=True, max_length=None, num_labels = 1)
 else:
     model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, return_dict=True, max_length=None)
+
+
+# == SETUP THE MODEL == 
+peft_config = VeraConfig(
+    task_type="SEQ_CLS", 
+    inference_mode=False, 
+    r=args.r, 
+    vera_alpha=args.vera_alpha,
+    use_rsvera=args.use_rsvera,
+    projection_prng_key=0xABC,
+    d_initial=0.1,
+    target_modules=["key","query", "value"],
+    save_projection=True
+)
 
 model = get_peft_model(model, peft_config)
 model.print_trainable_parameters()
@@ -164,6 +168,7 @@ lr_scheduler = get_linear_schedule_with_warmup(
     num_training_steps=(len(train_dataloader) * num_epochs),
 )
 
+# == TRAINING LOOP == 
 model.to(device)
 for epoch in range(num_epochs):
     model.train()
@@ -207,6 +212,8 @@ load_model(model, f"{model_name_or_path}_{task}.safetensors")
 # Load the Vera model
 #inference_model = PeftModel.from_pretrained(inference_model, model)
 #print("testt:", test_dataloader)
+
+# == EVALUATE LOOP == 
 model.to(device)
 model.eval()
 for step, batch in enumerate(tqdm(eval_dataloader)):
@@ -222,7 +229,6 @@ for step, batch in enumerate(tqdm(eval_dataloader)):
         predictions=predictions,
         references=references,
     )
-#print("testtt:", test_dataloader)
 
 eval_metric = metric.compute()
 print("Final evaluate result: ", eval_metric)

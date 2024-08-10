@@ -41,7 +41,6 @@ from .buffer_dict import BufferDict
 from .config import VeraConfig
 from .layer import Embedding, Linear, VeraLayer
 
-
 def _kaiming_init(
     tensor_or_shape: Union[torch.Tensor, Tuple[int, ...]],
     generator: torch.Generator,
@@ -149,6 +148,7 @@ class VeraModel(BaseTuner):
         peft_config = _maybe_include_all_linear_layers(peft_config, self.model)
 
         first_linear, first_embedding = None, None
+        # Iterate over all modules in the model
         for key, module in self.model.named_modules():
             if (
                 _check_for_modules_to_save
@@ -214,16 +214,16 @@ class VeraModel(BaseTuner):
     def __init__(self, model, config, adapter_name) -> None:
         # Separate two parent class init for correct vera_A/B init.
         nn.Module.__init__(self)
-        self.model = model
+        self.model = model # Get the backbone model
         config = config[adapter_name]
 
         if config.projection_prng_key is None:
             msg = "`config.projection_prng_key` must not be `None` when using VeRA!"
             raise ValueError(msg)
 
-        if config.projection_prng_key is None:
-            msg = "`config.projection_prng_key` must not be `None` when using VeRA!"
-            raise ValueError(msg)
+        # if config.projection_prng_key is None:
+        #     msg = "`config.projection_prng_key` must not be `None` when using VeRA!"
+        #     raise ValueError(msg)
 
         first_linear, first_embedding = self._find_first_dim(config)
 
@@ -244,7 +244,7 @@ class VeraModel(BaseTuner):
         generator = torch.Generator(device="cpu").manual_seed(config.projection_prng_key)
         if first_linear is not None:
             vera_A = _kaiming_init((config.r, first_linear_in_dim), generator=generator)
-            vera_B = _kaiming_init((first_linear_out_dim, config.r), generator=generator)
+            vera_B = _kaiming_init((first_linear_out_dim, config.r), generator=generator) 
 
             self.vera_A[adapter_name] = vera_A
             self.vera_B[adapter_name] = vera_B
