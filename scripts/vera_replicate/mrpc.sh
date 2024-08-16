@@ -1,5 +1,5 @@
 #!/bin/bash
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=2
 export WORKDIR=./
 export PYTHONPATH="$WORKDIR:$PYTHONPATH"
 python rsvera.py \

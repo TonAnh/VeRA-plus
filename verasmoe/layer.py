@@ -235,6 +235,14 @@ class Linear(nn.Linear, VeraLayer):
                           num_experts = num_experts, top_k = top_k) #### SMOE
         
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
+        
+        #### SMOE
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.router_d = nn.Linear(self.in_features, num_experts, device = device)
+        self.router_b = nn.Linear(self.in_features, num_experts, device = device)
+        self.top_k = top_k
+        self.num_experts = num_experts
+
 
     def merge(
         self,
@@ -363,8 +371,34 @@ class Linear(nn.Linear, VeraLayer):
                 # lambda_d = self.vera_lambda_d[active_adapter]
                 # lambda_b = self.vera_lambda_b[active_adapter]
                 
-                #### SMOE
+                #### SMOE ==============
+                # Get the experts
+                lambda_d_experts = self.vera_lambda_d[active_adapter]
+                lambda_b_experts = self.vera_lambda_b[active_adapter]
                 
+                lambda_d_experts = [expert for expert in lambda_d_experts]
+                lambda_b_experts = [expert for expert in lambda_b_experts] 
+                
+                lambda_d_experts = torch.stack(lambda_d_experts) # [num_experts, rank]
+                lambda_b_experts = torch.stack(lambda_b_experts) # [num_experts, out_features]
+                
+                # Step 1: Router output
+                logit_lambda_d = self.router_d(x) # Shape [Batch, tokens, num_experts]
+                logit_lambda_b = self.router_b(x) # Shape [Batch, tokens, num_experts]
+                
+                # Step 2: Probabilities_output
+                probs_lambda_d, top_k_indices_d = torch.topk(logit_lambda_d, self.top_k) # Shape [Batch, tokens, top_k]
+                probs_lambda_d = probs_lambda_d.softmax(dim=2, dtype = torch.float)
+                
+                probs_lambda_b, top_k_indices_b = torch.topk(logit_lambda_b, self.top_k)
+                probs_lambda_b = probs_lambda_b.softmax(dim=2, dtype = torch.float)
+                
+                # Step 3: Calculate weight
+                gather_experts_d = lambda_d_experts[top_k_indices_d]
+                gather_experts_b = lambda_b_experts[top_k_indices_b]
+                
+                combined_lambda_d = torch.sum(probs_lambda_d.unsqueeze(-1) * gather_experts_d, dim = 2)
+                combined_lambda_b = torch.sum(probs_lambda_b.unsqueeze(-1) * gather_experts_b, dim = 2)
                 #==============
 
                 vera_A = self.vera_A[active_adapter]
@@ -372,8 +406,9 @@ class Linear(nn.Linear, VeraLayer):
 
                 dropout = self.vera_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
-                x = x.to(lambda_d.dtype)
-                result += (lambda_b * F.linear(lambda_d * F.linear(dropout(x), vera_A), vera_B)) * scaling ####
+                x = x.to(combined_lambda_d.dtype)
+                # breakpoint()
+                result += (combined_lambda_b * F.linear(combined_lambda_d * F.linear(dropout(x), vera_A), vera_B)) * scaling ####
 
         result = result.to(previous_dtype)
         return result
@@ -392,14 +427,22 @@ class Embedding(nn.Embedding, VeraLayer):
         vera_dropout: float = 0.0,
         use_rsvera: bool = False,
         d_initial: float = 1.0,
-        ####
+        #### SMOE
+        num_experts: int = 4,
+        top_k: int = 1,
         **kwargs,
     ) -> None:
         init_vera_weights = kwargs.pop("init_vera_weights", True)
         VeraLayer.__init__(self, base_layer, **kwargs)
         self.update_layer_embedding(
-            adapter_name, vera_A, vera_B, r, vera_alpha, vera_dropout, init_vera_weights, use_rsvera, d_initial=d_initial
-        ) ####
+            adapter_name, vera_A, vera_B, r, vera_alpha, vera_dropout, init_vera_weights, use_rsvera, d_initial=d_initial,
+            num_experts = num_experts, top_k = top_k,
+        ) #### SMOE
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.router_d = nn.Linear(self.in_features, num_experts, device = device)
+        self.router_b = nn.Linear(self.in_features, num_experts, device = device)
+        self.top_k = top_k
+        self.num_experts = num_experts
         
     def update_layer(self, adapter_name, vera_A: BufferDict, vera_B: BufferDict, r, vera_alpha, vera_dropout, init_vera_weights, use_rsvera, d_initial: float = 1): ####
         if r <= 0:
@@ -535,14 +578,45 @@ class Embedding(nn.Embedding, VeraLayer):
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.vera_lambda_d:
                     continue
-                lambda_d = self.vera_lambda_d[active_adapter]
-                lambda_b = self.vera_lambda_b[active_adapter]
-                ####
-
+                # lambda_d = self.vera_lambda_d[active_adapter]
+                # lambda_b = self.vera_lambda_b[active_adapter]
+                
+                #### SMOE 
+                # Get the experts
+                lambda_d_experts = self.vera_lambda_d[active_adapter]
+                lambda_b_experts = self.vera_lambda_b[active_adapter]
+                
+                lambda_d_experts = [expert for expert in lambda_d_experts]
+                lambda_b_experts = [expert for expert in lambda_b_experts] 
+                
+                lambda_d_experts = torch.stack(lambda_d_experts) # [num_experts, rank]
+                lambda_b_experts = torch.stack(lambda_b_experts) # [num_experts, out_features]
+                
+                # Step 1: Router output
+                logit_lambda_d = self.router_d(x) # Shape [Batch, tokens, num_experts]
+                logit_lambda_b = self.router_b(x) # Shape [Batch, tokens, num_experts]
+                
+                # Step 2: Probabilities_output
+                probs_lambda_d, top_k_indices_d = torch.topk(logit_lambda_d, self.top_k) # Shape [Batch, tokens, top_k]
+                probs_lambda_d = probs_lambda_d.softmax(dim=2, dtype = torch.float)
+                
+                probs_lambda_b, top_k_indices_b = torch.topk(logit_lambda_b, self.top_k)
+                probs_lambda_b = probs_lambda_b.softmax(dim=2, dtype = torch.float)
+                
+                # Step 3: Calculate weight
+                gather_experts_d = lambda_d_experts[top_k_indices_d]
+                gather_experts_b = lambda_b_experts[top_k_indices_b]
+                
+                combined_lambda_d = torch.sum(probs_lambda_d.unsqueeze(-1) * gather_experts_d, dim = 2)
+                combined_lambda_b = torch.sum(probs_lambda_b.unsqueeze(-1) * gather_experts_b, dim = 2)
+                
+                # ==============
+                
                 vera_A = self.vera_A[active_adapter]
                 vera_B = self.vera_B[active_adapter]
                 scaling = self.scaling[active_adapter]
-                after_A = lambda_d * self._embed(x, vera_A.T)
-                result += lambda_b * (after_A @ vera_B.T) * scaling ####
+                # breakpoint()
+                after_A = combined_lambda_d * self._embed(x, vera_A.T)
+                result += combined_lambda_b * (after_A @ vera_B.T) * scaling #### SMOE
 
         return result

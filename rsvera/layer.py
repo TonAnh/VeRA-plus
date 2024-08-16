@@ -209,6 +209,7 @@ class Linear(nn.Linear, VeraLayer):
         self.update_layer(adapter_name, vera_A, vera_B, r, vera_alpha, vera_dropout, init_vera_weights, use_rsvera, d_initial=d_initial)
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
+
     def merge(
         self,
         adapter_names: Optional[List[str]] = None,
@@ -328,7 +329,7 @@ class Linear(nn.Linear, VeraLayer):
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.vera_lambda_d.keys():
                     continue
-
+                
                 lambda_d = self.vera_lambda_d[active_adapter]
                 lambda_b = self.vera_lambda_b[active_adapter]
 
@@ -452,7 +453,8 @@ class Embedding(nn.Embedding, VeraLayer):
             vera_B = vera_B.float()
             lambda_d = lambda_d.float()
             lambda_b = lambda_b.float()
-
+            
+        breakpoint()
         lambda_b = lambda_b.unsqueeze(-1)
         lambda_d = lambda_d.unsqueeze(-1)
         output_tensor = transpose(( lambda_b * vera_B) @ (lambda_d * vera_A), True)
