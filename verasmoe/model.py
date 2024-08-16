@@ -236,7 +236,7 @@ class VeraModel(BaseTuner):
         # if we choose not to save them.
         self.vera_A = BufferDict({}, persistent=config.save_projection)
         self.vera_B = BufferDict({}, persistent=config.save_projection)
-
+        # breakpoint()
         self.vera_embedding_A = BufferDict({}, persistent=config.save_projection)
         self.vera_embedding_B = BufferDict({}, persistent=config.save_projection)
 
@@ -326,7 +326,7 @@ class VeraModel(BaseTuner):
             "fan_in_fan_out": vera_config.fan_in_fan_out,
             "init_vera_weights": vera_config.init_vera_weights,
             "use_rsvera": vera_config.use_rsvera,
-        }
+        } ####
 
         # TODO: add back once we have quant support
         # kwargs["loaded_in_8bit"] = False
@@ -348,7 +348,9 @@ class VeraModel(BaseTuner):
                 vera_config.init_vera_weights,
                 #vera_config.use_rsvera,
                 d_initial=vera_config.d_initial,
-                ####
+                #### SMOE
+                num_experts = vera_config.num_experts,
+                top_k = vera_config.top_k,
             )
         elif isinstance(target, Linear):
             target.update_layer(
@@ -361,7 +363,9 @@ class VeraModel(BaseTuner):
                 vera_config.init_vera_weights,
                 vera_config.use_rsvera,
                 d_initial=vera_config.d_initial,
-                ####
+                #### SMOE
+                num_experts = vera_config.num_experts,
+                top_k = vera_config.top_k,
             )
         else:
             new_module = self._create_new_module(vera_config, self.vera_A, self.vera_B, adapter_name, target, **kwargs)
@@ -436,7 +440,9 @@ class VeraModel(BaseTuner):
                 vera_B,
                 adapter_name,
                 d_initial=vera_config.d_initial,
-                ####
+                #### SMOE
+                num_experts = vera_config.num_experts,
+                top_k = vera_config.top_k,
                 **embedding_kwargs,
             )
         else:
@@ -467,7 +473,9 @@ class VeraModel(BaseTuner):
                 adapter_name,
                 bias=bias,
                 d_initial=vera_config.d_initial,
-                ####
+                #### SMOE
+                num_experts = vera_config.num_experts,
+                top_k = vera_config.top_k,
                 **kwargs,
             )
 
