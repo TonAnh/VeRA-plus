@@ -1,7 +1,9 @@
 import argparse
 import os
-
 import torch
+import random
+import numpy as np
+import time
 from torch.optim import AdamW
 from safetensors.torch import load_model, save_model
 from peft import PeftModel, PeftConfig
@@ -36,6 +38,7 @@ parser = argparse.ArgumentParser()
 
 # Add arguments for configuration
 parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
+parser.add_argument("--output_dir", type=str, default="output", help="The output directory to save the fintune model")
 parser.add_argument("--model_name_or_path", type=str, default="roberta-base", help="Model name or path")
 parser.add_argument("--task", type=str, default="cola", help="Task name")
 parser.add_argument("--peft_type", type=str, default="LORA", help="PEFT type")
@@ -45,11 +48,17 @@ parser.add_argument("--max_length", type=int, default=512, help="Maximum sequenc
 parser.add_argument("--r", type=int, default=8, help="R value for LoraConfig")
 parser.add_argument("--lora_alpha", type=int, default=8, help="Lora alpha value for LoraConfig")
 parser.add_argument("--lora_dropout", type=float, default=0.1, help="Lora dropout value for LoraConfig")
-parser.add_argument("--use_rslora", type=bool, default=True, help="Whether to use RSLora in LoraConfig")
+parser.add_argument("--use_rslora", type=bool, default=False, help="Whether to use RSLora in LoraConfig")
 parser.add_argument("--lr", type=float, default=4e-4, help="Learning rate")
+parser.add_argument("--seed", type=int, default=42, help="Seed")
 
 # Parse arguments
 args = parser.parse_args()
+
+# Set seed 
+torch.manual_seed(args.seed)
+random.seed(args.seed)
+np.random.seed(args.seed)
 
 # Assign configuration values
 batch_size = args.batch_size
@@ -59,21 +68,15 @@ peft_type = args.peft_type
 device = args.device
 num_epochs = args.num_epochs
 max_length = args.max_length
-
-# Create LoraConfig object
-peft_config = LoraConfig(
-    task_type="SEQ_CLS", 
-    inference_mode=False, 
-    r=args.r, 
-    lora_alpha=args.lora_alpha, 
-    lora_dropout=args.lora_dropout,
-    use_rslora=args.use_rslora,
-)
+output_dir = args.output_dir
 lr = args.lr
+
 if any(k in model_name_or_path for k in ("gpt", "opt", "bloom")):
     padding_side = "left"
 else:
     padding_side = "right"
+
+preprocess_time_start = time.perf_counter()
 
 tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, padding_side=padding_side)
 if getattr(tokenizer, "pad_token_id") is None:
@@ -124,36 +127,32 @@ tokenized_datasets = datasets.map(
 # We also rename the 'label' column to 'labels' which is the expected name for labels by the models of the
 # transformers library
 tokenized_datasets = tokenized_datasets.rename_column("label", "labels")
-# breakpoint()
-# # Step 1: Convert labels to integers if task is stsb
-# def convert_labels_to_int(examples):
-#     if task == "stsb":
-#         examples["labels"] = int(round(examples["labels"]))
-#     return examples
-
-# if task == "stsb":
-#     # Apply conversion function
-#     tokenized_datasets["train"] = tokenized_datasets["train"].map(convert_labels_to_int)
-#     tokenized_datasets["validation"] = tokenized_datasets["validation"].map(convert_labels_to_int)
-#     # Step 2: Cast column type to int after conversion
-#     tokenized_datasets["train"] = tokenized_datasets["train"].cast_column("labels", Value(dtype="int32"))
-#     tokenized_datasets["validation"] = tokenized_datasets["validation"].cast_column("labels", Value(dtype="int32"))
 
 def collate_fn(examples):
     return tokenizer.pad(examples, padding="longest", return_tensors="pt")
-
 
 # Instantiate dataloaders.
 train_dataloader = DataLoader(tokenized_datasets["train"], shuffle=True, collate_fn=collate_fn, batch_size=batch_size)
 eval_dataloader = DataLoader(
     tokenized_datasets["validation"], shuffle=False, collate_fn=collate_fn, batch_size=batch_size
 )
+test_dataloader = DataLoader(tokenized_datasets["test"], shuffle=False, collate_fn=collate_fn, batch_size=batch_size)
+preprocess_time_end = time.perf_counter()
 
-#model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, return_dict=True, max_length=None)
 if task == "stsb":
     model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, return_dict=True, num_labels=1)
 else:
     model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, return_dict=True)
+
+# Create LoraConfig object
+peft_config = LoraConfig(
+    task_type="SEQ_CLS", 
+    inference_mode=False, 
+    r=args.r, 
+    lora_alpha=args.lora_alpha, 
+    lora_dropout=args.lora_dropout,
+    use_rslora=args.use_rslora,
+)
 model = get_peft_model(model, peft_config)
 model.print_trainable_parameters()
 model
@@ -166,6 +165,7 @@ lr_scheduler = get_linear_schedule_with_warmup(
     num_training_steps=(len(train_dataloader) * num_epochs),
 )
 
+training_time_start = time.perf_counter()
 model.to(device)
 for epoch in range(num_epochs):
     model.train()
@@ -179,7 +179,7 @@ for epoch in range(num_epochs):
         optimizer.zero_grad()
 
     model.eval()
-    for step, batch in enumerate(tqdm(train_dataloader)):
+    for step, batch in enumerate(tqdm(eval_dataloader)):
         batch.to(device)
         with torch.no_grad():
             outputs = model(**batch)
@@ -195,13 +195,23 @@ for epoch in range(num_epochs):
 
     eval_metric = metric.compute()
     print(f"epoch {epoch}:", eval_metric)
-    
-    
-save_model(model, "model.safetensors")
 
-load_model(model, "model.safetensors")
+training_time_end = time.perf_counter()
 
+# Save the fintune model
+save_path = f"{output_dir}/{model_name_or_path}_{task}.safetensors"
 
+# Check if the directory exist, if not -> create it
+if not os.path.exists(os.path.dirname(save_path)):
+    os.makedirs(os.path.dirname(save_path))
+
+save_model(model, save_path)
+
+# Load model for evaluate
+load_model(model, save_path)
+
+evaluate_time_start = time.perf_counter()
+# == EVALUATE LOOP == 
 model.to(device)
 model.eval()
 for step, batch in enumerate(tqdm(eval_dataloader)):
@@ -219,8 +229,37 @@ for step, batch in enumerate(tqdm(eval_dataloader)):
         references=references,
     )
 
-eval_metric = metric.compute()
-print("Final evaluate result: ", eval_metric)
+valid_eval_metric = metric.compute()
+print("Final `validation` evaluate result: ", eval_metric)
+evaluate_time_end = time.perf_counter()
 
+# ==== TESTING LOOP =====
+for step, batch in enumerate(tqdm(test_dataloader)):
+    batch.to(device)
+    with torch.no_grad():
+        outputs = model(**batch)
+    if task == "stsb":
+        predictions = outputs.logits
+    else:
+        predictions = outputs.logits.argmax(dim=-1)
+    predictions, references = predictions, batch["labels"]
+    metric.add_batch(
+        predictions=predictions,
+        references=references,
+    )
+
+test_eval_metric = metric.compute()
+print("Final `testing` evaluate result: ", test_eval_metric)
+
+# Calculate run time
+preprocess_time = preprocess_time_end - preprocess_time_start
+training_time = training_time_end - training_time_start
+evaluate_time = evaluate_time_end - evaluate_time_start
+
+print("==== RUNTIME ====")
+print(f"Total run time: {(preprocess_time + training_time + evaluate_time):.2f}s")
+print(f"Preprocess time: {(preprocess_time):.2f}s")
+print(f"Training time: {(training_time):.2f}s")
+print(f"Evaluate time: {(evaluate_time):.2f}s")
 
  

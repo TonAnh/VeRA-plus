@@ -3,6 +3,8 @@ import wandb
 import random
 import argparse
 import numpy as np
+import os
+import time
 from torch.optim import AdamW
 from safetensors.torch import load_model, save_model
 from peft import PeftModel, PeftConfig
@@ -26,12 +28,9 @@ from rsverac.model import VeraModel
 
 PEFT_TYPE_TO_MODEL_MAPPING['VERA'] = VeraModel
 
-torch.manual_seed(784)
-random.seed(784)
-np.random.seed(784)
-
 parser = argparse.ArgumentParser()
 parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
+parser.add_argument("--output_dir", type=str, default="output", help="The output directory to save the fintune model")
 parser.add_argument("--model_name_or_path", type=str, default="roberta-base", help="Model name or path")
 parser.add_argument("--task", type=str, default="qnli", help="Task name")
 parser.add_argument("--peft_type", type=str, default="VERA", help="PEFT type")
@@ -43,40 +42,35 @@ parser.add_argument("--vera_alpha", type=int, default=8, help="Vera alpha value 
 parser.add_argument("--use_rsvera", type=bool, default=True, help="Whether to use RSVeRA")
 parser.add_argument("--head_lr", type=float, default=4e-3, help="Learning rate (head)")
 parser.add_argument("--vera_lr", type=float, default=1e-2, help="Learning rate (vera)")
+parser.add_argument("--d_init", type=float, default=0.1, help="Initial init value for `vera_lambda_d` vector in VeRA")
+parser.add_argument("--c_init", type=float, default=0.1, help="Initial init value for `vera_lambda_c` vector in VeRA-Plus")
+parser.add_argument("--seed", type=int, default=42, help="Seed")
 
 args = parser.parse_args()
+
+# Set seed 
+torch.manual_seed(args.seed)
+random.seed(args.seed)
+np.random.seed(args.seed)
+
 # Assign configuration values
 batch_size = args.batch_size
+output_dir = args.output_dir
 model_name_or_path = args.model_name_or_path
 task = args.task
 peft_type = args.peft_type
 device = args.device
 num_epochs = args.num_epochs
 max_length = args.max_length
-
-# VeraConfig object
-peft_config = VeraConfig(
-    task_type="SEQ_CLS", 
-    inference_mode=False, 
-    r=args.r, 
-    vera_alpha=args.vera_alpha,
-    use_rsvera=args.use_rsvera,
-    projection_prng_key=0xABC,
-    d_initial=0.1,
-    c_initial=0.1,
-    target_modules=["key","query", "value"],
-    save_projection=True
-)
-
 head_lr = args.head_lr
 vera_lr = args.vera_lr
-
 
 if any(k in model_name_or_path for k in ("gpt", "opt", "bloom")):
     padding_side = "left"
 else:
     padding_side = "right"
 
+preprocess_time_start = time.perf_counter()
 tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, padding_side=padding_side)
 if getattr(tokenizer, "pad_token_id") is None:
     tokenizer.pad_token_id = tokenizer.eos_token_id
@@ -131,26 +125,42 @@ tokenized_datasets = tokenized_datasets.rename_column("label", "labels")
 def collate_fn(examples):
     return tokenizer.pad(examples, padding="longest", return_tensors="pt")
 
-def relabel(example):
-    example['labels']=1 
-    return example
+# def relabel(example):
+#     example['labels']=1 
+#     return example
 
-tokenized_datasets["test"] = tokenized_datasets["test"].map(relabel)
-
+# tokenized_datasets["test"] = tokenized_datasets["test"].map(relabel)
 
 # Instantiate dataloaders.
 train_dataloader = DataLoader(tokenized_datasets["train"], shuffle=True, collate_fn=collate_fn, batch_size=batch_size)
 eval_dataloader = DataLoader(tokenized_datasets["validation"], shuffle=False, collate_fn=collate_fn, batch_size=batch_size)
 test_dataloader = DataLoader(tokenized_datasets["test"], shuffle=False, collate_fn=collate_fn, batch_size=batch_size)
+preprocess_time_end = time.perf_counter()
+
 
 if task == "stsb":
     model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, return_dict=True, max_length=None, num_labels = 1)
 else:
     model = AutoModelForSequenceClassification.from_pretrained(model_name_or_path, return_dict=True, max_length=None)
+
+# # == SETUP THE MODEL == 
+peft_config = VeraConfig(
+    task_type="SEQ_CLS", 
+    inference_mode=False, 
+    r=args.r, 
+    vera_alpha=args.vera_alpha,
+    use_rsvera=args.use_rsvera,
+    projection_prng_key=0xABC,
+    d_initial=args.d_init,
+    c_initial=args.c_init,
+    target_modules=["key","query", "value"],
+    save_projection=True
+)
+
 model = get_peft_model(model, peft_config)
 model.print_trainable_parameters()
 model
-#print(model)
+
 optimizer = AdamW(
     [
         {"params": [p for n, p in model.named_parameters() if "vera_lambda_" in n], "lr": vera_lr},
@@ -164,7 +174,8 @@ lr_scheduler = get_linear_schedule_with_warmup(
     num_warmup_steps=0.06 * (len(train_dataloader) * num_epochs),
     num_training_steps=(len(train_dataloader) * num_epochs),
 )
-print("train:", train_dataloader)
+
+training_time_start = time.perf_counter()
 model.to(device)
 for epoch in range(num_epochs):
     model.train()
@@ -195,15 +206,23 @@ for epoch in range(num_epochs):
     eval_metric = metric.compute()
     print(f"epoch {epoch}:", eval_metric)
     
-    
-save_model(model, f"{model_name_or_path}_{task}.safetensors")
-load_model(model, f"{model_name_or_path}_{task}.safetensors")
+training_time_end = time.perf_counter()
 
+# Save the fintune model
+save_path = f"{output_dir}/{model_name_or_path}_{task}.safetensors"
+
+# Check if the directory exist, if not -> create it
+if not os.path.exists(os.path.dirname(save_path)):
+    os.makedirs(os.path.dirname(save_path))
+
+save_model(model, save_path)
+
+# Load model for evaluate
+load_model(model, save_path)
+evaluate_time_start = time.perf_counter()
 model.to(device)
 model.eval()
-
-
-
+# === EVALUATE LOOP ==
 for step, batch in enumerate(tqdm(eval_dataloader)):
     batch.to(device)
     with torch.no_grad():
@@ -218,7 +237,36 @@ for step, batch in enumerate(tqdm(eval_dataloader)):
         references=references,
     )
 
-eval_metric = metric.compute()
-print("Final evaluate result: ", eval_metric)
+valid_eval_metric = metric.compute()
+print("Final `validation` evaluate result: ", eval_metric)
+evaluate_time_end = time.perf_counter()
 
+# ==== TESTING LOOP =====
+for step, batch in enumerate(tqdm(test_dataloader)):
+    batch.to(device)
+    with torch.no_grad():
+        outputs = model(**batch)
+    if task == "stsb":
+        predictions = outputs.logits
+    else:
+        predictions = outputs.logits.argmax(dim=-1)
+    predictions, references = predictions, batch["labels"]
+    metric.add_batch(
+        predictions=predictions,
+        references=references,
+    )
+
+test_eval_metric = metric.compute()
+print("Final `testing` evaluate result: ", test_eval_metric)
+
+# Calculate run time
+preprocess_time = preprocess_time_end - preprocess_time_start
+training_time = training_time_end - training_time_start
+evaluate_time = evaluate_time_end - evaluate_time_start
+
+print("==== RUNTIME ====")
+print(f"Total run time: {(preprocess_time + training_time + evaluate_time):.2f}s")
+print(f"Preprocess time: {(preprocess_time):.2f}s")
+print(f"Training time: {(training_time):.2f}s")
+print(f"Evaluate time: {(evaluate_time):.2f}s")
 

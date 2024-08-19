@@ -11,5 +11,5 @@ python vera-plus.py \
     --r 1024 \
     --vera_alpha 8 \
     --use_rsvera True \
-    --head_lr 4e-3\
-    --vera_lr 1e-2\
+    --head_lr 4e-3 \
+    --vera_lr 1e-2 \

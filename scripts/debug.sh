@@ -8,10 +8,10 @@ python vera-smoe.py \
     --task mrpc \
     --num_epochs 30 \
     --max_length 512 \
-    --num_experts 4 \
-    --top_k 1 \
     --r 1024 \
     --vera_alpha 8 \
     --use_rsvera True \
     --head_lr 4e-3 \
     --vera_lr 1e-2 \
+    --num_experts 4 \
+    --top_k 1 \

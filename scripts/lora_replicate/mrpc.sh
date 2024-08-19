@@ -10,4 +10,4 @@ python main_lora.py \
     --max_length 512 \
     --r 8 \
     --lora_alpha 8 \
-    --lr 4e-4
+    --lr 4e-4 \
