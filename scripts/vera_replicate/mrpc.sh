@@ -5,8 +5,9 @@ export PYTHONPATH="$WORKDIR:$PYTHONPATH"
 python rsvera.py \
     --batch_size 64 \
     --model_name_or_path "roberta-base" \
+    --output_dir "output/vera" \
     --task "mrpc" \
-    --num_epochs 1 \
+    --num_epochs 30 \
     --max_length 512 \
     --r 1024 \
     --vera_alpha 8 \

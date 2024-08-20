@@ -1,9 +1,10 @@
 #!/bin/bash
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=3
 export WORKDIR=./
 export PYTHONPATH="$WORKDIR:$PYTHONPATH"
 python vera-plus.py \
     --batch_size 64 \
+    --output_dir "output/vera-plus" \
     --model_name_or_path roberta-base \
     --task mrpc \
     --num_epochs 30 \
