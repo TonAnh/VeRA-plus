@@ -1,10 +1,11 @@
 #!/bin/bash
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=2
 export WORKDIR=./
 export PYTHONPATH="$WORKDIR:$PYTHONPATH"
 python rsvera.py \
     --batch_size 64 \
     --model_name_or_path "roberta-base" \
+    --output_dir "output/vera" \
     --task "mrpc" \
     --num_epochs 30 \
     --max_length 512 \
@@ -12,4 +13,4 @@ python rsvera.py \
     --vera_alpha 8 \
     --use_rsvera True \
     --head_lr 4e-3 \
-    --vera_lr 1e-2
+    --vera_lr 1e-2 \

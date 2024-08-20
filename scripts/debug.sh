@@ -1,10 +1,10 @@
 #!/bin/bash
-export CUDA_VISIBLE_DEVICES=3
+export CUDA_VISIBLE_DEVICES=4
 export WORKDIR=./
 export PYTHONPATH="$WORKDIR:$PYTHONPATH"
-python vera-plus.py \
+python vera-smoe.py \
     --batch_size 64 \
-    --output_dir "output/vera-plus" \
+    --output_dir "output/vera-smoe" \
     --model_name_or_path roberta-base \
     --task mrpc \
     --num_epochs 30 \
@@ -14,3 +14,5 @@ python vera-plus.py \
     --use_rsvera True \
     --head_lr 4e-3 \
     --vera_lr 1e-2 \
+    --num_experts 4 \
+    --top_k 1 \

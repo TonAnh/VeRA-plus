@@ -48,7 +48,6 @@ class VeraLayer(BaseTunerLayer):
         # Mark the weight as unmerged
         self._disable_adapters = False
         self.merged_adapters = []
-        self.kwargs = kwargs
 
         base_layer = self.get_base_layer()
         if isinstance(base_layer, nn.Linear):
@@ -62,6 +61,7 @@ class VeraLayer(BaseTunerLayer):
 
         self.in_features = in_features
         self.out_features = out_features
+        self.kwargs = kwargs
         
 
     @property
@@ -79,6 +79,9 @@ class VeraLayer(BaseTunerLayer):
         init_vera_weights,
         use_rsvera,
         d_initial: float = 1.0,
+        ####
+        num_experts: int = 4,
+        top_k: int = 1,
     ):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -91,8 +94,12 @@ class VeraLayer(BaseTunerLayer):
 
         self.vera_dropout.update(nn.ModuleDict({adapter_name: vera_dropout_layer}))
         # Actual trainable parameters
-        self.vera_lambda_b[adapter_name] = nn.Parameter(torch.ones(self.out_features), requires_grad=True)
-        self.vera_lambda_d[adapter_name] = nn.Parameter(torch.ones(r), requires_grad=True)
+        # self.vera_lambda_b[adapter_name] = nn.Parameter(torch.ones(self.out_features), requires_grad=True)
+        # self.vera_lambda_d[adapter_name] = nn.Parameter(torch.ones(r), requires_grad=True)
+        #### SMOE
+        self.vera_lambda_b[adapter_name] = nn.ParameterList([nn.Parameter(torch.ones(self.out_features), requires_grad=True) for _ in range(num_experts)])
+        self.vera_lambda_d[adapter_name] = nn.ParameterList([nn.Parameter(torch.ones(r), requires_grad=True) for _ in range(num_experts)])
+        
         if use_rsvera:
             self.scaling[adapter_name] = vera_alpha / math.sqrt(r)
         else:
@@ -105,9 +112,9 @@ class VeraLayer(BaseTunerLayer):
         # but should not be issue as these are just references to the normally initialised `vera_A/B`
         setattr(self, "vera_A", vera_A)
         setattr(self, "vera_B", vera_B)
-
+        
         if init_vera_weights:
-            self.reset_vera_parameters(adapter_name, d_initial=d_initial)
+            self.reset_vera_parameters(adapter_name, d_initial=d_initial) ####
 
         weight = getattr(self.get_base_layer(), "weight", None)
         if weight is not None:
@@ -129,6 +136,9 @@ class VeraLayer(BaseTunerLayer):
         init_vera_weights,
         use_rsvera,
         d_initial: float = 1.0,
+        ####
+        num_experts: int = 4,
+        top_k: int = 1,
     ):
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
@@ -141,9 +151,12 @@ class VeraLayer(BaseTunerLayer):
 
         self.vera_dropout[adapter_name] = vera_dropout_layer
         # Actual trainable parameters
-        self.vera_lambda_b[adapter_name] = nn.Parameter(torch.ones(self.out_features), requires_grad=True)
-        self.vera_lambda_d[adapter_name] = nn.Parameter(torch.ones(r), requires_grad=True)
-
+        # self.vera_lambda_b[adapter_name] = nn.Parameter(torch.ones(self.out_features), requires_grad=True)
+        # self.vera_lambda_d[adapter_name] = nn.Parameter(torch.ones(r), requires_grad=True)
+        #### SMOE
+        self.vera_lambda_b[adapter_name] = nn.ParameterList([nn.Parameter(torch.ones(self.out_features), requires_grad=True) for _ in range(num_experts)])
+        self.vera_lambda_d[adapter_name] = nn.ParameterList([nn.Parameter(torch.ones(r), requires_grad = True) for _ in range(num_experts)])
+        
         # non trainable references to vera_A/B buffers
         # use setattr as this happens post `nn.Module.__init__`
         # but should not be issue as these are just references to the normally initialised `vera_A/B`
@@ -157,18 +170,26 @@ class VeraLayer(BaseTunerLayer):
         #self.scaling[adapter_name] = vera_alpha / math.sqrt(r)
         
         if init_vera_weights:
-            self.reset_vera_parameters(adapter_name, d_initial=d_initial)
+            self.reset_vera_parameters(adapter_name, d_initial=d_initial) ####
 
         weight = getattr(self.get_base_layer(), "weight", None)
         if weight is not None:
             # the layer is already completely initialized, this is an update
             self.to(self.weight.device, dtype=weight.dtype)
 
+    # def reset_vera_parameters(self, adapter_name, d_initial: float = 1.0):
+    #     if adapter_name in self.vera_lambda_d.keys():
+    #         with torch.no_grad():
+    #             nn.init.zeros_(self.vera_lambda_d[adapter_name]).fill_(d_initial) 
+    #             nn.init.zeros_(self.vera_lambda_b[adapter_name])
+    #### SMOE            
     def reset_vera_parameters(self, adapter_name, d_initial: float = 1.0):
         if adapter_name in self.vera_lambda_d.keys():
             with torch.no_grad():
-                nn.init.zeros_(self.vera_lambda_d[adapter_name]).fill_(d_initial)
-                nn.init.zeros_(self.vera_lambda_b[adapter_name])
+                for param in self.vera_lambda_d[adapter_name]:
+                    nn.init.zeros_(param).fill_(d_initial)
+                for param in self.vera_lambda_b[adapter_name]:
+                    nn.init.zeros_(param)
 
 
 # Below was based on 'src/peft/tuners/lora/layer.py
@@ -197,6 +218,9 @@ class Linear(nn.Linear, VeraLayer):
         init_vera_weights: Union[bool, str] = True,
         use_rsvera: bool = False,
         d_initial: float = 1.0,
+        #### SMOE
+        num_experts: int = 4,
+        top_k: int = 1,
         **kwargs,
     ) -> None:
         # this gets the init from nn.Linear's super perspective, i.e.
@@ -206,8 +230,18 @@ class Linear(nn.Linear, VeraLayer):
         self.fan_in_fan_out = fan_in_fan_out
 
         self._active_adapter = adapter_name
-        self.update_layer(adapter_name, vera_A, vera_B, r, vera_alpha, vera_dropout, init_vera_weights, use_rsvera, d_initial=d_initial)
+        self.update_layer(adapter_name, vera_A, vera_B, r, vera_alpha, vera_dropout,
+                          init_vera_weights, use_rsvera, d_initial=d_initial,
+                          num_experts = num_experts, top_k = top_k) #### SMOE
+        
         self.is_target_conv_1d_layer = is_target_conv_1d_layer
+        
+        #### SMOE
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.router_d = nn.Linear(self.in_features, num_experts, device = device)
+        self.router_b = nn.Linear(self.in_features, num_experts, device = device)
+        self.top_k = top_k
+        self.num_experts = num_experts
 
 
     def merge(
@@ -289,16 +323,19 @@ class Linear(nn.Linear, VeraLayer):
 
         lambda_d = self.vera_lambda_d[adapter]
         lambda_b = self.vera_lambda_b[adapter]
+        ####
 
         if cast_to_fp32:
             vera_A = vera_A.float()
             vera_B = vera_B.float()
             lambda_d = lambda_d.float()
             lambda_b = lambda_b.float()
+            ####
 
         lambda_b = lambda_b.unsqueeze(-1)
         lambda_d = lambda_d.unsqueeze(-1)
-        output_tensor = transpose((lambda_b * vera_B) @ (lambda_d * vera_A), self.fan_in_fan_out)
+        ####
+        output_tensor = transpose((lambda_b * vera_B) @ (lambda_d * vera_A), self.fan_in_fan_out) ####
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -307,6 +344,7 @@ class Linear(nn.Linear, VeraLayer):
             # TODO: why?
             self.vera_lambda_d[adapter].data = lambda_d.to(dtype)
             self.vera_lambda_b[adapter].data = lambda_b.to(dtype)
+            ####
 
         return output_tensor
 
@@ -329,17 +367,48 @@ class Linear(nn.Linear, VeraLayer):
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.vera_lambda_d.keys():
                     continue
+
+                # lambda_d = self.vera_lambda_d[active_adapter]
+                # lambda_b = self.vera_lambda_b[active_adapter]
                 
-                lambda_d = self.vera_lambda_d[active_adapter]
-                lambda_b = self.vera_lambda_b[active_adapter]
+                #### SMOE ==============
+                # Get the experts
+                lambda_d_experts = self.vera_lambda_d[active_adapter]
+                lambda_b_experts = self.vera_lambda_b[active_adapter]
+                
+                lambda_d_experts = [expert for expert in lambda_d_experts]
+                lambda_b_experts = [expert for expert in lambda_b_experts] 
+                
+                lambda_d_experts = torch.stack(lambda_d_experts) # [num_experts, rank]
+                lambda_b_experts = torch.stack(lambda_b_experts) # [num_experts, out_features]
+                
+                # Step 1: Router output
+                logit_lambda_d = self.router_d(x) # Shape [Batch, tokens, num_experts]
+                logit_lambda_b = self.router_b(x) # Shape [Batch, tokens, num_experts]
+                
+                # Step 2: Probabilities_output
+                probs_lambda_d, top_k_indices_d = torch.topk(logit_lambda_d, self.top_k) # Shape [Batch, tokens, top_k]
+                probs_lambda_d = probs_lambda_d.softmax(dim=2, dtype = torch.float)
+                
+                probs_lambda_b, top_k_indices_b = torch.topk(logit_lambda_b, self.top_k)
+                probs_lambda_b = probs_lambda_b.softmax(dim=2, dtype = torch.float)
+                
+                # Step 3: Calculate weight
+                gather_experts_d = lambda_d_experts[top_k_indices_d]
+                gather_experts_b = lambda_b_experts[top_k_indices_b]
+                
+                combined_lambda_d = torch.sum(probs_lambda_d.unsqueeze(-1) * gather_experts_d, dim = 2)
+                combined_lambda_b = torch.sum(probs_lambda_b.unsqueeze(-1) * gather_experts_b, dim = 2)
+                #==============
 
                 vera_A = self.vera_A[active_adapter]
                 vera_B = self.vera_B[active_adapter]
 
                 dropout = self.vera_dropout[active_adapter]
                 scaling = self.scaling[active_adapter]
-                x = x.to(lambda_d.dtype)
-                result += (lambda_b * F.linear(lambda_d * F.linear(dropout(x), vera_A), vera_B)) * scaling
+                x = x.to(combined_lambda_d.dtype)
+                # breakpoint()
+                result += (combined_lambda_b * F.linear(combined_lambda_d * F.linear(dropout(x), vera_A), vera_B)) * scaling ####
 
         result = result.to(previous_dtype)
         return result
@@ -358,15 +427,24 @@ class Embedding(nn.Embedding, VeraLayer):
         vera_dropout: float = 0.0,
         use_rsvera: bool = False,
         d_initial: float = 1.0,
+        #### SMOE
+        num_experts: int = 4,
+        top_k: int = 1,
         **kwargs,
     ) -> None:
         init_vera_weights = kwargs.pop("init_vera_weights", True)
         VeraLayer.__init__(self, base_layer, **kwargs)
         self.update_layer_embedding(
-            adapter_name, vera_A, vera_B, r, vera_alpha, vera_dropout, init_vera_weights, use_rsvera, d_initial=d_initial
-        )
+            adapter_name, vera_A, vera_B, r, vera_alpha, vera_dropout, init_vera_weights, use_rsvera, d_initial=d_initial,
+            num_experts = num_experts, top_k = top_k,
+        ) #### SMOE
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.router_d = nn.Linear(self.in_features, num_experts, device = device)
+        self.router_b = nn.Linear(self.in_features, num_experts, device = device)
+        self.top_k = top_k
+        self.num_experts = num_experts
         
-    def update_layer(self, adapter_name, vera_A: BufferDict, vera_B: BufferDict, r, vera_alpha, vera_dropout, init_vera_weights, use_rsvera, d_initial: float = 1):
+    def update_layer(self, adapter_name, vera_A: BufferDict, vera_B: BufferDict, r, vera_alpha, vera_dropout, init_vera_weights, use_rsvera, d_initial: float = 1): ####
         if r <= 0:
             raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
         
@@ -447,17 +525,19 @@ class Embedding(nn.Embedding, VeraLayer):
 
         lambda_d = self.vera_lambda_d[adapter]
         lambda_b = self.vera_lambda_b[adapter]
+        ####
 
         if cast_to_fp32:
             vera_A = vera_A.float()
             vera_B = vera_B.float()
             lambda_d = lambda_d.float()
             lambda_b = lambda_b.float()
-            
-        breakpoint()
+            ####
+
         lambda_b = lambda_b.unsqueeze(-1)
         lambda_d = lambda_d.unsqueeze(-1)
-        output_tensor = transpose(( lambda_b * vera_B) @ (lambda_d * vera_A), True)
+        ####
+        output_tensor = transpose(( lambda_b * vera_B) @ (lambda_d * vera_A), True) ####
 
         if cast_to_fp32:
             output_tensor = output_tensor.to(dtype=dtype)
@@ -465,6 +545,7 @@ class Embedding(nn.Embedding, VeraLayer):
             # cast back the weights
             self.vera_lambda_d[adapter].data = lambda_d.to(dtype)
             self.vera_lambda_b[adapter].data = lambda_b.to(dtype)
+            ####
 
         return output_tensor
 
@@ -497,13 +578,45 @@ class Embedding(nn.Embedding, VeraLayer):
             for active_adapter in self.active_adapters:
                 if active_adapter not in self.vera_lambda_d:
                     continue
-                lambda_d = self.vera_lambda_d[active_adapter]
-                lambda_b = self.vera_lambda_b[active_adapter]
-
+                # lambda_d = self.vera_lambda_d[active_adapter]
+                # lambda_b = self.vera_lambda_b[active_adapter]
+                
+                #### SMOE 
+                # Get the experts
+                lambda_d_experts = self.vera_lambda_d[active_adapter]
+                lambda_b_experts = self.vera_lambda_b[active_adapter]
+                
+                lambda_d_experts = [expert for expert in lambda_d_experts]
+                lambda_b_experts = [expert for expert in lambda_b_experts] 
+                
+                lambda_d_experts = torch.stack(lambda_d_experts) # [num_experts, rank]
+                lambda_b_experts = torch.stack(lambda_b_experts) # [num_experts, out_features]
+                
+                # Step 1: Router output
+                logit_lambda_d = self.router_d(x) # Shape [Batch, tokens, num_experts]
+                logit_lambda_b = self.router_b(x) # Shape [Batch, tokens, num_experts]
+                
+                # Step 2: Probabilities_output
+                probs_lambda_d, top_k_indices_d = torch.topk(logit_lambda_d, self.top_k) # Shape [Batch, tokens, top_k]
+                probs_lambda_d = probs_lambda_d.softmax(dim=2, dtype = torch.float)
+                
+                probs_lambda_b, top_k_indices_b = torch.topk(logit_lambda_b, self.top_k)
+                probs_lambda_b = probs_lambda_b.softmax(dim=2, dtype = torch.float)
+                
+                # Step 3: Calculate weight
+                gather_experts_d = lambda_d_experts[top_k_indices_d]
+                gather_experts_b = lambda_b_experts[top_k_indices_b]
+                
+                combined_lambda_d = torch.sum(probs_lambda_d.unsqueeze(-1) * gather_experts_d, dim = 2)
+                combined_lambda_b = torch.sum(probs_lambda_b.unsqueeze(-1) * gather_experts_b, dim = 2)
+                
+                # ==============
+                
                 vera_A = self.vera_A[active_adapter]
                 vera_B = self.vera_B[active_adapter]
                 scaling = self.scaling[active_adapter]
-                after_A = lambda_d * self._embed(x, vera_A.T)
-                result += lambda_b * (after_A @ vera_B.T) * scaling
+                # breakpoint()
+                after_A = combined_lambda_d * self._embed(x, vera_A.T)
+                result += combined_lambda_b * (after_A @ vera_B.T) * scaling #### SMOE
 
         return result
